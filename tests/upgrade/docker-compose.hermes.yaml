@@ -1,0 +1,69 @@
+# Docker Compose for Akash Local Development with Pyth Oracle
+#
+# This setup includes:
+#   - akash-node: Single-node validator with pyth_vaa and pyth_pro contracts
+#   - hermes-client: Upgraded Hermes relayer that submits Pyth PNAU data to pyth_pro
+#
+# Prerequisites:
+#   - Build contracts first: cd contracts && make build
+#   - PYTH_HERMES_API_KEY for the upgraded Pyth Hermes API
+#
+# Usage:
+#   docker-compose -f _build/docker-compose.yaml up -d          # Start all services
+#   docker-compose -f _build/docker-compose.yaml logs -f        # View all logs
+#   docker-compose -f _build/docker-compose.yaml logs -f validator     # View node logs
+#   docker-compose -f _build/docker-compose.yaml logs -f hermes-client # View hermes logs
+#   docker-compose -f _build/docker-compose.yaml down           # Stop services
+#   docker-compose -f _build/docker-compose.yaml down -v        # Stop and clean volumes
+#
+# Verify:
+#   curl http://localhost:26657/status                               # Check node status
+#   curl http://localhost:1317/cosmos/base/tendermint/v1beta1/blocks/latest  # Check latest block
+#
+---
+services:
+  # =============================================================================
+  # Hermes Price Relayer
+  # =============================================================================
+  hermes-client:
+    image: ${HERMES_IMAGE:-ghcr.io/akash-network/hermes:latest}
+    container_name: hermes-client
+    hostname: hermes-client
+    network_mode: "host"
+    environment:
+      # RPC endpoint (internal docker network)
+      - HC_RPC_ENDPOINT=http://host.docker.internal:26657
+      # Upgraded Pyth Hermes API
+      - HC_HERMES_ENDPOINT=${PYTH_HERMES_ENDPOINT:-https://pyth.dourolabs.app/hermes}
+      - HC_HERMES_API_KEY=${PYTH_HERMES_API_KEY:-}
+      - HC_PRICE_FETCHING_METHOD=polling
+      # Update interval (1 minute for testing, use 5+ minutes in production)
+      - HC_UPDATE_INTERVAL_MS=10000
+      - HC_PRICE_DEVIATION_TOLERANCE=0
+      # Gas configuration
+      - HC_GAS_PRICE=0.025uakt
+      - HC_DENOM=uakt
+      - NODE_ENV=development
+    env_file:
+      - ${AKASH_RUN_DIR}/hermes.env
+    ports:
+      - "3000:3000"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "================================================"
+        echo "Hermes Price Relayer - Waiting for configuration"
+        echo "================================================"
+
+        echo "Contract address: $$HC_CONTRACT_ADDRESS"
+        echo "Starting Hermes daemon..."
+        echo ""
+
+        # Run the hermes daemon
+        exec node dist/cli.js daemon
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
